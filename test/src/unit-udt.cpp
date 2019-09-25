@@ -1,11 +1,12 @@
 /*
     __ _____ _____ _____
  __|  |   __|     |   | |  JSON for Modern C++ (test suite)
-|  |  |__   |  |  | | | |  version 3.1.2
+|  |  |__   |  |  | | | |  version 3.7.0
 |_____|_____|_____|_|___|  https://github.com/nlohmann/json
 
 Licensed under the MIT License <http://opensource.org/licenses/MIT>.
-Copyright (c) 2013-2018 Niels Lohmann <http://nlohmann.me>.
+SPDX-License-Identifier: MIT
+Copyright (c) 2013-2019 Niels Lohmann <http://nlohmann.me>.
 
 Permission is hereby  granted, free of charge, to any  person obtaining a copy
 of this software and associated  documentation files (the "Software"), to deal
@@ -26,10 +27,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE  OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include "catch.hpp"
+#include "doctest_compatibility.h"
 
 #include <nlohmann/json.hpp>
-
 using nlohmann::json;
 
 #include <array>
@@ -235,7 +235,7 @@ void from_json(const nlohmann::json& j, contact_book& cb)
 }
 }
 
-TEST_CASE("basic usage", "[udt]")
+TEST_CASE("basic usage" * doctest::test_suite("udt"))
 {
 
     // a bit narcissic maybe :) ?
@@ -295,6 +295,19 @@ TEST_CASE("basic usage", "[udt]")
             CHECK(contacts == book.m_contacts);
             CHECK(book_name == udt::name{"C++"});
             CHECK(book == parsed_book);
+        }
+
+        SECTION("via explicit calls to get_to")
+        {
+            udt::person person;
+            udt::name name;
+
+            json person_json = big_json["contacts"][0]["person"];
+            CHECK(person_json.get_to(person) == sfinae_addict);
+
+            // correct reference gets returned
+            person_json["name"].get_to(name).m_val = "new name";
+            CHECK(name.m_val == "new name");
         }
 
         SECTION("implicit conversions")
@@ -378,7 +391,7 @@ struct adl_serializer<udt::legacy_type>
 };
 }
 
-TEST_CASE("adl_serializer specialization", "[udt]")
+TEST_CASE("adl_serializer specialization" * doctest::test_suite("udt"))
 {
     SECTION("partial specialization")
     {
@@ -454,7 +467,7 @@ struct adl_serializer<std::vector<float>>
 };
 }
 
-TEST_CASE("even supported types can be specialized", "[udt]")
+TEST_CASE("even supported types can be specialized" * doctest::test_suite("udt"))
 {
     json j = std::vector<float> {1.0, 2.0, 3.0};
     CHECK(j.dump() == R"("hijacked!")");
@@ -495,7 +508,7 @@ struct adl_serializer<std::unique_ptr<T>>
 };
 }
 
-TEST_CASE("Non-copyable types", "[udt]")
+TEST_CASE("Non-copyable types" * doctest::test_suite("udt"))
 {
     SECTION("to_json")
     {
@@ -585,9 +598,8 @@ struct pod_serializer
     static void to_json(BasicJsonType& j, const  T& t) noexcept
     {
         auto bytes = static_cast< const unsigned char*>(static_cast<const void*>(&t));
-        std::uint64_t value = bytes[0];
-        for (auto i = 1; i < 8; ++i)
-            value |= std::uint64_t{bytes[i]} << 8 * i;
+        std::uint64_t value;
+        std::memcpy(&value, bytes, sizeof(value));
         nlohmann::to_json(j, value);
     }
 };
@@ -637,7 +649,7 @@ std::ostream& operator<<(std::ostream& os, small_pod l)
 }
 }
 
-TEST_CASE("custom serializer for pods", "[udt]")
+TEST_CASE("custom serializer for pods" * doctest::test_suite("udt"))
 {
     using custom_json =
         nlohmann::basic_json<std::map, std::vector, std::string, bool,
@@ -678,7 +690,7 @@ struct another_adl_serializer
     }
 };
 
-TEST_CASE("custom serializer that does adl by default", "[udt]")
+TEST_CASE("custom serializer that does adl by default" * doctest::test_suite("udt"))
 {
     using json = nlohmann::json;
 
@@ -784,7 +796,7 @@ template <typename T>
 struct is_constructible_patched<T, decltype(void(json(std::declval<T>())))> : std::true_type {};
 }
 
-TEST_CASE("an incomplete type does not trigger a compiler error in non-evaluated context", "[udt]")
+TEST_CASE("an incomplete type does not trigger a compiler error in non-evaluated context" * doctest::test_suite("udt"))
 {
     static_assert(not is_constructible_patched<json, incomplete>::value, "");
 }
@@ -809,4 +821,10 @@ TEST_CASE("Issue #924")
 
     CHECK_NOTHROW(j.get<Evil>());
     CHECK_NOTHROW(j.get<std::vector<Evil>>());
+}
+
+TEST_CASE("Issue #1237")
+{
+    struct non_convertible_type {};
+    static_assert(not std::is_convertible<json, non_convertible_type>::value, "");
 }

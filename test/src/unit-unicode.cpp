@@ -1,11 +1,12 @@
 /*
     __ _____ _____ _____
  __|  |   __|     |   | |  JSON for Modern C++ (test suite)
-|  |  |__   |  |  | | | |  version 3.1.2
+|  |  |__   |  |  | | | |  version 3.7.0
 |_____|_____|_____|_|___|  https://github.com/nlohmann/json
 
 Licensed under the MIT License <http://opensource.org/licenses/MIT>.
-Copyright (c) 2013-2018 Niels Lohmann <http://nlohmann.me>.
+SPDX-License-Identifier: MIT
+Copyright (c) 2013-2019 Niels Lohmann <http://nlohmann.me>.
 
 Permission is hereby  granted, free of charge, to any  person obtaining a copy
 of this software and associated  documentation files (the "Software"), to deal
@@ -26,17 +27,99 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE  OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include "catch.hpp"
+#include "doctest_compatibility.h"
+
+// for some reason including this after the json header leads to linker errors with VS 2017...
+#include <locale>
 
 #define private public
 #include <nlohmann/json.hpp>
 using nlohmann::json;
+#undef private
 
 #include <fstream>
+#include <sstream>
 #include <iostream>
+#include <iomanip>
 
+namespace
+{
 extern size_t calls;
 size_t calls = 0;
+
+void check_utf8dump(bool success_expected, int byte1, int byte2, int byte3, int byte4);
+
+void check_utf8dump(bool success_expected, int byte1, int byte2 = -1, int byte3 = -1, int byte4 = -1)
+{
+    std::string json_string;
+
+    CAPTURE(byte1)
+    CAPTURE(byte2)
+    CAPTURE(byte3)
+    CAPTURE(byte4)
+
+    json_string += std::string(1, static_cast<char>(byte1));
+
+    if (byte2 != -1)
+    {
+        json_string += std::string(1, static_cast<char>(byte2));
+    }
+
+    if (byte3 != -1)
+    {
+        json_string += std::string(1, static_cast<char>(byte3));
+    }
+
+    if (byte4 != -1)
+    {
+        json_string += std::string(1, static_cast<char>(byte4));
+    }
+
+    CAPTURE(json_string)
+
+    // store the string in a JSON value
+    json j = json_string;
+    json j2 = "abc" + json_string + "xyz";
+
+    // dumping with ignore/replace must not throw in any case
+    auto s_ignored = j.dump(-1, ' ', false, json::error_handler_t::ignore);
+    auto s_ignored2 = j2.dump(-1, ' ', false, json::error_handler_t::ignore);
+    auto s_ignored_ascii = j.dump(-1, ' ', true, json::error_handler_t::ignore);
+    auto s_ignored2_ascii = j2.dump(-1, ' ', true, json::error_handler_t::ignore);
+    auto s_replaced = j.dump(-1, ' ', false, json::error_handler_t::replace);
+    auto s_replaced2 = j2.dump(-1, ' ', false, json::error_handler_t::replace);
+    auto s_replaced_ascii = j.dump(-1, ' ', true, json::error_handler_t::replace);
+    auto s_replaced2_ascii = j2.dump(-1, ' ', true, json::error_handler_t::replace);
+
+    if (success_expected)
+    {
+        // strict mode must not throw if success is expected
+        auto s_strict = j.dump();
+        // all dumps should agree on the string
+        CHECK(s_strict == s_ignored);
+        CHECK(s_strict == s_replaced);
+    }
+    else
+    {
+        // strict mode must throw if success is not expected
+        CHECK_THROWS_AS(j.dump(), json::type_error&);
+        // ignore and replace must create different dumps
+        CHECK(s_ignored != s_replaced);
+
+        // check that replace string contains a replacement character
+        CHECK(s_replaced.find("\xEF\xBF\xBD") != std::string::npos);
+    }
+
+    // check that prefix and suffix are preserved
+    CHECK(s_ignored2.substr(1, 3) == "abc");
+    CHECK(s_ignored2.substr(s_ignored2.size() - 4, 3) == "xyz");
+    CHECK(s_ignored2_ascii.substr(1, 3) == "abc");
+    CHECK(s_ignored2_ascii.substr(s_ignored2_ascii.size() - 4, 3) == "xyz");
+    CHECK(s_replaced2.substr(1, 3) == "abc");
+    CHECK(s_replaced2.substr(s_replaced2.size() - 4, 3) == "xyz");
+    CHECK(s_replaced2_ascii.substr(1, 3) == "abc");
+    CHECK(s_replaced2_ascii.substr(s_replaced2_ascii.size() - 4, 3) == "xyz");
+}
 
 void check_utf8string(bool success_expected, int byte1, int byte2, int byte3, int byte4);
 
@@ -50,42 +133,44 @@ void check_utf8string(bool success_expected, int byte1, int byte2 = -1, int byte
 
     std::string json_string = "\"";
 
-    CAPTURE(byte1);
+    CAPTURE(byte1)
     json_string += std::string(1, static_cast<char>(byte1));
 
     if (byte2 != -1)
     {
-        CAPTURE(byte2);
+        CAPTURE(byte2)
         json_string += std::string(1, static_cast<char>(byte2));
     }
 
     if (byte3 != -1)
     {
-        CAPTURE(byte3);
+        CAPTURE(byte3)
         json_string += std::string(1, static_cast<char>(byte3));
     }
 
     if (byte4 != -1)
     {
-        CAPTURE(byte4);
+        CAPTURE(byte4)
         json_string += std::string(1, static_cast<char>(byte4));
     }
 
     json_string += "\"";
 
-    CAPTURE(json_string);
+    CAPTURE(json_string)
 
+    json _;
     if (success_expected)
     {
-        CHECK_NOTHROW(json::parse(json_string));
+        CHECK_NOTHROW(_ = json::parse(json_string));
     }
     else
     {
-        CHECK_THROWS_AS(json::parse(json_string), json::parse_error&);
+        CHECK_THROWS_AS(_ = json::parse(json_string), json::parse_error&);
     }
 }
+}
 
-TEST_CASE("Unicode", "[hide]")
+TEST_CASE("Unicode" * doctest::skip())
 {
     SECTION("RFC 3629")
     {
@@ -114,11 +199,13 @@ TEST_CASE("Unicode", "[hide]")
             for (int byte1 = 0x80; byte1 <= 0xC1; ++byte1)
             {
                 check_utf8string(false, byte1);
+                check_utf8dump(false, byte1);
             }
 
             for (int byte1 = 0xF5; byte1 <= 0xFF; ++byte1)
             {
                 check_utf8string(false, byte1);
+                check_utf8dump(false, byte1);
             }
         }
 
@@ -151,6 +238,7 @@ TEST_CASE("Unicode", "[hide]")
 
                     // all other characters are OK
                     check_utf8string(true, byte1);
+                    check_utf8dump(true, byte1);
                 }
             }
         }
@@ -164,6 +252,7 @@ TEST_CASE("Unicode", "[hide]")
                     for (int byte2 = 0x80; byte2 <= 0xBF; ++byte2)
                     {
                         check_utf8string(true, byte1, byte2);
+                        check_utf8dump(true, byte1, byte2);
                     }
                 }
             }
@@ -173,6 +262,7 @@ TEST_CASE("Unicode", "[hide]")
                 for (int byte1 = 0xC2; byte1 <= 0xDF; ++byte1)
                 {
                     check_utf8string(false, byte1);
+                    check_utf8dump(false, byte1);
                 }
             }
 
@@ -189,6 +279,7 @@ TEST_CASE("Unicode", "[hide]")
                         }
 
                         check_utf8string(false, byte1, byte2);
+                        check_utf8dump(false, byte1, byte2);
                     }
                 }
             }
@@ -205,6 +296,7 @@ TEST_CASE("Unicode", "[hide]")
                         for (int byte3 = 0x80; byte3 <= 0xBF; ++byte3)
                         {
                             check_utf8string(true, byte1, byte2, byte3);
+                            check_utf8dump(true, byte1, byte2, byte3);
                         }
                     }
                 }
@@ -215,6 +307,7 @@ TEST_CASE("Unicode", "[hide]")
                 for (int byte1 = 0xE0; byte1 <= 0xE0; ++byte1)
                 {
                     check_utf8string(false, byte1);
+                    check_utf8dump(false, byte1);
                 }
             }
 
@@ -225,6 +318,7 @@ TEST_CASE("Unicode", "[hide]")
                     for (int byte2 = 0xA0; byte2 <= 0xBF; ++byte2)
                     {
                         check_utf8string(false, byte1, byte2);
+                        check_utf8dump(false, byte1, byte2);
                     }
                 }
             }
@@ -244,6 +338,7 @@ TEST_CASE("Unicode", "[hide]")
                         for (int byte3 = 0x80; byte3 <= 0xBF; ++byte3)
                         {
                             check_utf8string(false, byte1, byte2, byte3);
+                            check_utf8dump(false, byte1, byte2, byte3);
                         }
                     }
                 }
@@ -264,6 +359,7 @@ TEST_CASE("Unicode", "[hide]")
                             }
 
                             check_utf8string(false, byte1, byte2, byte3);
+                            check_utf8dump(false, byte1, byte2, byte3);
                         }
                     }
                 }
@@ -281,6 +377,7 @@ TEST_CASE("Unicode", "[hide]")
                         for (int byte3 = 0x80; byte3 <= 0xBF; ++byte3)
                         {
                             check_utf8string(true, byte1, byte2, byte3);
+                            check_utf8dump(true, byte1, byte2, byte3);
                         }
                     }
                 }
@@ -291,6 +388,7 @@ TEST_CASE("Unicode", "[hide]")
                 for (int byte1 = 0xE1; byte1 <= 0xEC; ++byte1)
                 {
                     check_utf8string(false, byte1);
+                    check_utf8dump(false, byte1);
                 }
             }
 
@@ -301,6 +399,7 @@ TEST_CASE("Unicode", "[hide]")
                     for (int byte2 = 0x80; byte2 <= 0xBF; ++byte2)
                     {
                         check_utf8string(false, byte1, byte2);
+                        check_utf8dump(false, byte1, byte2);
                     }
                 }
             }
@@ -320,6 +419,7 @@ TEST_CASE("Unicode", "[hide]")
                         for (int byte3 = 0x80; byte3 <= 0xBF; ++byte3)
                         {
                             check_utf8string(false, byte1, byte2, byte3);
+                            check_utf8dump(false, byte1, byte2, byte3);
                         }
                     }
                 }
@@ -340,6 +440,7 @@ TEST_CASE("Unicode", "[hide]")
                             }
 
                             check_utf8string(false, byte1, byte2, byte3);
+                            check_utf8dump(false, byte1, byte2, byte3);
                         }
                     }
                 }
@@ -357,6 +458,7 @@ TEST_CASE("Unicode", "[hide]")
                         for (int byte3 = 0x80; byte3 <= 0xBF; ++byte3)
                         {
                             check_utf8string(true, byte1, byte2, byte3);
+                            check_utf8dump(true, byte1, byte2, byte3);
                         }
                     }
                 }
@@ -367,6 +469,7 @@ TEST_CASE("Unicode", "[hide]")
                 for (int byte1 = 0xED; byte1 <= 0xED; ++byte1)
                 {
                     check_utf8string(false, byte1);
+                    check_utf8dump(false, byte1);
                 }
             }
 
@@ -377,6 +480,7 @@ TEST_CASE("Unicode", "[hide]")
                     for (int byte2 = 0x80; byte2 <= 0x9F; ++byte2)
                     {
                         check_utf8string(false, byte1, byte2);
+                        check_utf8dump(false, byte1, byte2);
                     }
                 }
             }
@@ -396,6 +500,7 @@ TEST_CASE("Unicode", "[hide]")
                         for (int byte3 = 0x80; byte3 <= 0xBF; ++byte3)
                         {
                             check_utf8string(false, byte1, byte2, byte3);
+                            check_utf8dump(false, byte1, byte2, byte3);
                         }
                     }
                 }
@@ -416,6 +521,7 @@ TEST_CASE("Unicode", "[hide]")
                             }
 
                             check_utf8string(false, byte1, byte2, byte3);
+                            check_utf8dump(false, byte1, byte2, byte3);
                         }
                     }
                 }
@@ -433,6 +539,7 @@ TEST_CASE("Unicode", "[hide]")
                         for (int byte3 = 0x80; byte3 <= 0xBF; ++byte3)
                         {
                             check_utf8string(true, byte1, byte2, byte3);
+                            check_utf8dump(true, byte1, byte2, byte3);
                         }
                     }
                 }
@@ -443,6 +550,7 @@ TEST_CASE("Unicode", "[hide]")
                 for (int byte1 = 0xEE; byte1 <= 0xEF; ++byte1)
                 {
                     check_utf8string(false, byte1);
+                    check_utf8dump(false, byte1);
                 }
             }
 
@@ -453,6 +561,7 @@ TEST_CASE("Unicode", "[hide]")
                     for (int byte2 = 0x80; byte2 <= 0xBF; ++byte2)
                     {
                         check_utf8string(false, byte1, byte2);
+                        check_utf8dump(false, byte1, byte2);
                     }
                 }
             }
@@ -472,6 +581,7 @@ TEST_CASE("Unicode", "[hide]")
                         for (int byte3 = 0x80; byte3 <= 0xBF; ++byte3)
                         {
                             check_utf8string(false, byte1, byte2, byte3);
+                            check_utf8dump(false, byte1, byte2, byte3);
                         }
                     }
                 }
@@ -492,6 +602,7 @@ TEST_CASE("Unicode", "[hide]")
                             }
 
                             check_utf8string(false, byte1, byte2, byte3);
+                            check_utf8dump(false, byte1, byte2, byte3);
                         }
                     }
                 }
@@ -511,6 +622,7 @@ TEST_CASE("Unicode", "[hide]")
                             for (int byte4 = 0x80; byte4 <= 0xBF; ++byte4)
                             {
                                 check_utf8string(true, byte1, byte2, byte3, byte4);
+                                check_utf8dump(true, byte1, byte2, byte3, byte4);
                             }
                         }
                     }
@@ -522,6 +634,7 @@ TEST_CASE("Unicode", "[hide]")
                 for (int byte1 = 0xF0; byte1 <= 0xF0; ++byte1)
                 {
                     check_utf8string(false, byte1);
+                    check_utf8dump(false, byte1);
                 }
             }
 
@@ -532,6 +645,7 @@ TEST_CASE("Unicode", "[hide]")
                     for (int byte2 = 0x90; byte2 <= 0xBF; ++byte2)
                     {
                         check_utf8string(false, byte1, byte2);
+                        check_utf8dump(false, byte1, byte2);
                     }
                 }
             }
@@ -545,6 +659,7 @@ TEST_CASE("Unicode", "[hide]")
                         for (int byte3 = 0x80; byte3 <= 0xBF; ++byte3)
                         {
                             check_utf8string(false, byte1, byte2, byte3);
+                            check_utf8dump(false, byte1, byte2, byte3);
                         }
                     }
                 }
@@ -567,6 +682,7 @@ TEST_CASE("Unicode", "[hide]")
                             for (int byte4 = 0x80; byte4 <= 0xBF; ++byte4)
                             {
                                 check_utf8string(false, byte1, byte2, byte3, byte4);
+                                check_utf8dump(false, byte1, byte2, byte3, byte4);
                             }
                         }
                     }
@@ -590,6 +706,7 @@ TEST_CASE("Unicode", "[hide]")
                             for (int byte4 = 0x80; byte4 <= 0xBF; ++byte4)
                             {
                                 check_utf8string(false, byte1, byte2, byte3, byte4);
+                                check_utf8dump(false, byte1, byte2, byte3, byte4);
                             }
                         }
                     }
@@ -613,6 +730,7 @@ TEST_CASE("Unicode", "[hide]")
                                 }
 
                                 check_utf8string(false, byte1, byte2, byte3, byte4);
+                                check_utf8dump(false, byte1, byte2, byte3, byte4);
                             }
                         }
                     }
@@ -633,6 +751,7 @@ TEST_CASE("Unicode", "[hide]")
                             for (int byte4 = 0x80; byte4 <= 0xBF; ++byte4)
                             {
                                 check_utf8string(true, byte1, byte2, byte3, byte4);
+                                check_utf8dump(true, byte1, byte2, byte3, byte4);
                             }
                         }
                     }
@@ -644,6 +763,7 @@ TEST_CASE("Unicode", "[hide]")
                 for (int byte1 = 0xF1; byte1 <= 0xF3; ++byte1)
                 {
                     check_utf8string(false, byte1);
+                    check_utf8dump(false, byte1);
                 }
             }
 
@@ -654,6 +774,7 @@ TEST_CASE("Unicode", "[hide]")
                     for (int byte2 = 0x80; byte2 <= 0xBF; ++byte2)
                     {
                         check_utf8string(false, byte1, byte2);
+                        check_utf8dump(false, byte1, byte2);
                     }
                 }
             }
@@ -667,6 +788,7 @@ TEST_CASE("Unicode", "[hide]")
                         for (int byte3 = 0x80; byte3 <= 0xBF; ++byte3)
                         {
                             check_utf8string(false, byte1, byte2, byte3);
+                            check_utf8dump(false, byte1, byte2, byte3);
                         }
                     }
                 }
@@ -689,6 +811,7 @@ TEST_CASE("Unicode", "[hide]")
                             for (int byte4 = 0x80; byte4 <= 0xBF; ++byte4)
                             {
                                 check_utf8string(false, byte1, byte2, byte3, byte4);
+                                check_utf8dump(false, byte1, byte2, byte3, byte4);
                             }
                         }
                     }
@@ -712,6 +835,7 @@ TEST_CASE("Unicode", "[hide]")
                             for (int byte4 = 0x80; byte4 <= 0xBF; ++byte4)
                             {
                                 check_utf8string(false, byte1, byte2, byte3, byte4);
+                                check_utf8dump(false, byte1, byte2, byte3, byte4);
                             }
                         }
                     }
@@ -735,6 +859,7 @@ TEST_CASE("Unicode", "[hide]")
                                 }
 
                                 check_utf8string(false, byte1, byte2, byte3, byte4);
+                                check_utf8dump(false, byte1, byte2, byte3, byte4);
                             }
                         }
                     }
@@ -755,6 +880,7 @@ TEST_CASE("Unicode", "[hide]")
                             for (int byte4 = 0x80; byte4 <= 0xBF; ++byte4)
                             {
                                 check_utf8string(true, byte1, byte2, byte3, byte4);
+                                check_utf8dump(true, byte1, byte2, byte3, byte4);
                             }
                         }
                     }
@@ -766,6 +892,7 @@ TEST_CASE("Unicode", "[hide]")
                 for (int byte1 = 0xF4; byte1 <= 0xF4; ++byte1)
                 {
                     check_utf8string(false, byte1);
+                    check_utf8dump(false, byte1);
                 }
             }
 
@@ -776,6 +903,7 @@ TEST_CASE("Unicode", "[hide]")
                     for (int byte2 = 0x80; byte2 <= 0x8F; ++byte2)
                     {
                         check_utf8string(false, byte1, byte2);
+                        check_utf8dump(false, byte1, byte2);
                     }
                 }
             }
@@ -789,6 +917,7 @@ TEST_CASE("Unicode", "[hide]")
                         for (int byte3 = 0x80; byte3 <= 0xBF; ++byte3)
                         {
                             check_utf8string(false, byte1, byte2, byte3);
+                            check_utf8dump(false, byte1, byte2, byte3);
                         }
                     }
                 }
@@ -811,6 +940,7 @@ TEST_CASE("Unicode", "[hide]")
                             for (int byte4 = 0x80; byte4 <= 0xBF; ++byte4)
                             {
                                 check_utf8string(false, byte1, byte2, byte3, byte4);
+                                check_utf8dump(false, byte1, byte2, byte3, byte4);
                             }
                         }
                     }
@@ -834,6 +964,7 @@ TEST_CASE("Unicode", "[hide]")
                             for (int byte4 = 0x80; byte4 <= 0xBF; ++byte4)
                             {
                                 check_utf8string(false, byte1, byte2, byte3, byte4);
+                                check_utf8dump(false, byte1, byte2, byte3, byte4);
                             }
                         }
                     }
@@ -857,6 +988,7 @@ TEST_CASE("Unicode", "[hide]")
                                 }
 
                                 check_utf8string(false, byte1, byte2, byte3, byte4);
+                                check_utf8dump(false, byte1, byte2, byte3, byte4);
                             }
                         }
                     }
@@ -919,8 +1051,9 @@ TEST_CASE("Unicode", "[hide]")
                 }
 
                 json_text += "\"";
-                CAPTURE(json_text);
-                CHECK_NOTHROW(json::parse(json_text));
+                CAPTURE(json_text)
+                json _;
+                CHECK_NOTHROW(_ = json::parse(json_text));
             }
         }
 
@@ -928,33 +1061,35 @@ TEST_CASE("Unicode", "[hide]")
         {
             SECTION("incorrect surrogate values")
             {
-                CHECK_THROWS_AS(json::parse("\"\\uDC00\\uDC00\""), json::parse_error&);
-                CHECK_THROWS_WITH(json::parse("\"\\uDC00\\uDC00\""),
-                                  "[json.exception.parse_error.101] parse error at 7: syntax error - invalid string: surrogate U+DC00..U+DFFF must follow U+D800..U+DBFF; last read: '\"\\uDC00'");
+                json _;
 
-                CHECK_THROWS_AS(json::parse("\"\\uD7FF\\uDC00\""), json::parse_error&);
-                CHECK_THROWS_WITH(json::parse("\"\\uD7FF\\uDC00\""),
-                                  "[json.exception.parse_error.101] parse error at 13: syntax error - invalid string: surrogate U+DC00..U+DFFF must follow U+D800..U+DBFF; last read: '\"\\uD7FF\\uDC00'");
+                CHECK_THROWS_AS(_ = json::parse("\"\\uDC00\\uDC00\""), json::parse_error&);
+                CHECK_THROWS_WITH(_ = json::parse("\"\\uDC00\\uDC00\""),
+                                  "[json.exception.parse_error.101] parse error at line 1, column 7: syntax error while parsing value - invalid string: surrogate U+DC00..U+DFFF must follow U+D800..U+DBFF; last read: '\"\\uDC00'");
 
-                CHECK_THROWS_AS(json::parse("\"\\uD800]\""), json::parse_error&);
-                CHECK_THROWS_WITH(json::parse("\"\\uD800]\""),
-                                  "[json.exception.parse_error.101] parse error at 8: syntax error - invalid string: surrogate U+DC00..U+DFFF must be followed by U+DC00..U+DFFF; last read: '\"\\uD800]'");
+                CHECK_THROWS_AS(_ = json::parse("\"\\uD7FF\\uDC00\""), json::parse_error&);
+                CHECK_THROWS_WITH(_ = json::parse("\"\\uD7FF\\uDC00\""),
+                                  "[json.exception.parse_error.101] parse error at line 1, column 13: syntax error while parsing value - invalid string: surrogate U+DC00..U+DFFF must follow U+D800..U+DBFF; last read: '\"\\uD7FF\\uDC00'");
 
-                CHECK_THROWS_AS(json::parse("\"\\uD800\\v\""), json::parse_error&);
-                CHECK_THROWS_WITH(json::parse("\"\\uD800\\v\""),
-                                  "[json.exception.parse_error.101] parse error at 9: syntax error - invalid string: surrogate U+DC00..U+DFFF must be followed by U+DC00..U+DFFF; last read: '\"\\uD800\\v'");
+                CHECK_THROWS_AS(_ = json::parse("\"\\uD800]\""), json::parse_error&);
+                CHECK_THROWS_WITH(_ = json::parse("\"\\uD800]\""),
+                                  "[json.exception.parse_error.101] parse error at line 1, column 8: syntax error while parsing value - invalid string: surrogate U+DC00..U+DFFF must be followed by U+DC00..U+DFFF; last read: '\"\\uD800]'");
 
-                CHECK_THROWS_AS(json::parse("\"\\uD800\\u123\""), json::parse_error&);
-                CHECK_THROWS_WITH(json::parse("\"\\uD800\\u123\""),
-                                  "[json.exception.parse_error.101] parse error at 13: syntax error - invalid string: '\\u' must be followed by 4 hex digits; last read: '\"\\uD800\\u123\"'");
+                CHECK_THROWS_AS(_ = json::parse("\"\\uD800\\v\""), json::parse_error&);
+                CHECK_THROWS_WITH(_ = json::parse("\"\\uD800\\v\""),
+                                  "[json.exception.parse_error.101] parse error at line 1, column 9: syntax error while parsing value - invalid string: surrogate U+DC00..U+DFFF must be followed by U+DC00..U+DFFF; last read: '\"\\uD800\\v'");
 
-                CHECK_THROWS_AS(json::parse("\"\\uD800\\uDBFF\""), json::parse_error&);
-                CHECK_THROWS_WITH(json::parse("\"\\uD800\\uDBFF\""),
-                                  "[json.exception.parse_error.101] parse error at 13: syntax error - invalid string: surrogate U+DC00..U+DFFF must be followed by U+DC00..U+DFFF; last read: '\"\\uD800\\uDBFF'");
+                CHECK_THROWS_AS(_ = json::parse("\"\\uD800\\u123\""), json::parse_error&);
+                CHECK_THROWS_WITH(_ = json::parse("\"\\uD800\\u123\""),
+                                  "[json.exception.parse_error.101] parse error at line 1, column 13: syntax error while parsing value - invalid string: '\\u' must be followed by 4 hex digits; last read: '\"\\uD800\\u123\"'");
 
-                CHECK_THROWS_AS(json::parse("\"\\uD800\\uE000\""), json::parse_error&);
-                CHECK_THROWS_WITH(json::parse("\"\\uD800\\uE000\""),
-                                  "[json.exception.parse_error.101] parse error at 13: syntax error - invalid string: surrogate U+DC00..U+DFFF must be followed by U+DC00..U+DFFF; last read: '\"\\uD800\\uE000'");
+                CHECK_THROWS_AS(_ = json::parse("\"\\uD800\\uDBFF\""), json::parse_error&);
+                CHECK_THROWS_WITH(_ = json::parse("\"\\uD800\\uDBFF\""),
+                                  "[json.exception.parse_error.101] parse error at line 1, column 13: syntax error while parsing value - invalid string: surrogate U+DC00..U+DFFF must be followed by U+DC00..U+DFFF; last read: '\"\\uD800\\uDBFF'");
+
+                CHECK_THROWS_AS(_ = json::parse("\"\\uD800\\uE000\""), json::parse_error&);
+                CHECK_THROWS_WITH(_ = json::parse("\"\\uD800\\uE000\""),
+                                  "[json.exception.parse_error.101] parse error at line 1, column 13: syntax error while parsing value - invalid string: surrogate U+DC00..U+DFFF must be followed by U+DC00..U+DFFF; last read: '\"\\uD800\\uE000'");
             }
         }
 
@@ -968,7 +1103,7 @@ TEST_CASE("Unicode", "[hide]")
                 for (std::size_t cp = 0xD800u; cp <= 0xDBFFu; ++cp)
                 {
                     std::string json_text = "\"" + codepoint_to_unicode(cp) + "\"";
-                    CAPTURE(json_text);
+                    CAPTURE(json_text)
                     CHECK_THROWS_AS(json::parse(json_text), json::parse_error&);
                 }
             }
@@ -987,7 +1122,7 @@ TEST_CASE("Unicode", "[hide]")
                         }
 
                         std::string json_text = "\"" + codepoint_to_unicode(cp1) + codepoint_to_unicode(cp2) + "\"";
-                        CAPTURE(json_text);
+                        CAPTURE(json_text)
                         CHECK_THROWS_AS(json::parse(json_text), json::parse_error&);
                     }
                 }
@@ -1000,7 +1135,7 @@ TEST_CASE("Unicode", "[hide]")
                 for (std::size_t cp = 0xDC00u; cp <= 0xDFFFu; ++cp)
                 {
                     std::string json_text = "\"" + codepoint_to_unicode(cp) + "\"";
-                    CAPTURE(json_text);
+                    CAPTURE(json_text)
                     CHECK_THROWS_AS(json::parse(json_text), json::parse_error&);
                 }
             }
@@ -1072,16 +1207,20 @@ TEST_CASE("Unicode", "[hide]")
 
     SECTION("error for incomplete/wrong BOM")
     {
-        CHECK_THROWS_AS(json::parse("\xef\xbb"), json::parse_error&);
-        CHECK_THROWS_AS(json::parse("\xef\xbb\xbb"), json::parse_error&);
+        json _;
+        CHECK_THROWS_AS(_ = json::parse("\xef\xbb"), json::parse_error&);
+        CHECK_THROWS_AS(_ = json::parse("\xef\xbb\xbb"), json::parse_error&);
     }
 }
 
+namespace
+{
 void roundtrip(bool success_expected, const std::string& s);
 
 void roundtrip(bool success_expected, const std::string& s)
 {
-    CAPTURE(s);
+    CAPTURE(s)
+    json _;
 
     // create JSON string value
     json j = s;
@@ -1097,11 +1236,11 @@ void roundtrip(bool success_expected, const std::string& s)
         if (s[0] != '\0')
         {
             // parsing JSON text succeeds
-            CHECK_NOTHROW(json::parse(ps));
+            CHECK_NOTHROW(_ = json::parse(ps));
         }
 
         // roundtrip succeeds
-        CHECK_NOTHROW(json::parse(j.dump()));
+        CHECK_NOTHROW(_ = json::parse(j.dump()));
 
         // after roundtrip, the same string is stored
         json jr = json::parse(j.dump());
@@ -1113,8 +1252,9 @@ void roundtrip(bool success_expected, const std::string& s)
         CHECK_THROWS_AS(j.dump(), json::type_error&);
 
         // parsing JSON text fails
-        CHECK_THROWS_AS(json::parse(ps), json::parse_error&);
+        CHECK_THROWS_AS(_ = json::parse(ps), json::parse_error&);
     }
+}
 }
 
 TEST_CASE("Markus Kuhn's UTF-8 decoder capability and stress test")
